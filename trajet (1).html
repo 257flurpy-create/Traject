@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f3d3e">
+<title>Trajet GPS</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--bg:#f6f8f7;--card:#fff;--ink:#12302f;--mut:#5d7473;--acc:#0f7b6c;--acc2:#e8a317;--red:#c8372d;--line:#d5e0de}
+@media(prefers-color-scheme:dark){:root{--bg:#10201f;--card:#1a2f2e;--ink:#e6f1ef;--mut:#93aeab;--acc:#3fc2ac;--acc2:#f0b43a;--red:#ef6b5f;--line:#2d4644}}
+*{box-sizing:border-box}[hidden]{display:none!important}
+.status{font-size:13px;margin:0 0 10px;padding:8px 10px;border-radius:10px;background:var(--bg);color:var(--mut)}.status.err{background:#c8372d22;color:var(--red);font-weight:600}.status.ok{color:var(--acc)}
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+#map{position:fixed;inset:0}
+.top{position:fixed;top:calc(env(safe-area-inset-top,0px) + 10px);left:10px;display:flex;flex-direction:column;gap:8px;z-index:500}
+.ib{width:46px;height:46px;border-radius:50%;border:0;background:var(--card);color:var(--ink);font-size:21px;box-shadow:0 2px 8px #0004}
+.ib.on{background:var(--acc);color:#fff}
+.panel{position:fixed;left:0;right:0;bottom:0;z-index:500;background:var(--card);border-radius:22px 22px 0 0;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 14px);box-shadow:0 -4px 16px #0003}
+.stats{display:flex;justify-content:space-between;margin-bottom:12px}
+.stats div{flex:1}.stats b{display:block;font-size:26px;letter-spacing:-.5px}.stats span{font-size:13px;color:var(--mut)}
+.row{display:flex;gap:10px}
+.btn{flex:1;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:700;background:var(--acc);color:#fff}
+.btn.sec{background:var(--acc2);color:#2a1d00}.btn.stop{background:var(--red)}.btn.ghost{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+.btn:disabled{opacity:.4}
+.sheet{position:fixed;inset:0;z-index:900;background:var(--bg);overflow:auto;padding:calc(env(safe-area-inset-top,0px) + 16px) 16px 30px;display:none}
+.sheet.open{display:block}
+.sheet h2{margin:4px 0 16px;font-size:22px}
+label{display:block;margin:14px 0 6px;font-weight:600}
+input[type=number],input[type=text]{width:100%;padding:13px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);font-size:17px}
+.opt{display:flex;gap:10px;align-items:flex-start;background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px}
+.opt small{display:block;color:var(--mut)}
+.trip{background:var(--card);border-radius:14px;padding:12px;margin-bottom:10px;border:1px solid var(--line)}
+.trip h3{margin:0 0 2px;font-size:17px}.trip p{margin:0 0 10px;color:var(--mut);font-size:13px}
+.trip .row .btn{padding:10px;font-size:14px}
+.empty{color:var(--mut);text-align:center;padding:30px 10px}
+.hint{color:var(--mut);font-size:13px;margin-top:6px}
+.me{width:18px;height:18px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 6px #2a7de144}
+.leaflet-top.leaflet-right{margin-top:calc(env(safe-area-inset-top,0px))}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div class="top">
+  <button class="ib" id="bSet" aria-label="Paramètres">⚙️</button>
+  <button class="ib" id="bHist" aria-label="Mes trajets">🗂️</button>
+  <button class="ib on" id="bFollow" aria-label="Suivre ma position">🎯</button>
+</div>
+
+<div class="panel">
+  <div class="status" id="status">GPS : en attente…</div>
+  <div class="stats">
+    <div><b id="sDist">0 m</b><span>Distance</span></div>
+    <div><b id="sPts">0</b><span>Points</span></div>
+    <div><b id="sTime">0:00</b><span>Durée</span></div>
+  </div>
+  <div class="row" id="rowIdle"><button class="btn" id="bNew">Nouveau trajet</button></div>
+  <div class="row" id="rowRun" hidden>
+    <button class="btn sec" id="bUpd" hidden disabled>Mise à jour trajet</button>
+    <button class="btn stop" id="bEnd">Finir le trajet</button>
+  </div>
+</div>
+
+<section class="sheet" id="shSet">
+  <h2>Paramètres</h2>
+  <label for="iX">Intervalle entre deux points (secondes)</label>
+  <input type="number" id="iX" min="1" max="3600" inputmode="numeric" placeholder="ex : 5">
+  <p class="hint">Obligatoire. Plus c’est court, plus le tracé est précis (et plus la batterie chauffe).</p>
+  <label>Mise à jour du trajet</label>
+  <label class="opt"><input type="radio" name="mode" value="auto"><span><b>Automatique</b><small>Le tracé et la distance se mettent à jour à chaque point.</small></span></label>
+  <label class="opt"><input type="radio" name="mode" value="manual"><span><b>Manuelle</b><small>Un bouton « Mise à jour trajet » calcule le tracé quand tu le décides.</small></span></label>
+  <div class="row" style="margin-top:18px"><button class="btn" id="bSave">Enregistrer</button></div>
+</section>
+
+<section class="sheet" id="shHist">
+  <h2>Mes trajets</h2>
+  <div class="row" style="margin-bottom:14px">
+    <button class="btn ghost" id="bImp">📥 Importer un fichier</button>
+    <button class="btn ghost" id="bClose">Fermer</button>
+  </div>
+  <input type="file" id="fileIn" accept=".geojson,.json,application/json,application/geo+json" hidden>
+  <div id="list"></div>
+</section>
+
+<script>
+const $=s=>document.querySelector(s);
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+const save=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}};
+let S=load('settings',{x:null,mode:'auto'}), trips=load('trips',[]);
+let cur=null,timer=null,tick=null,follow=true,shown=0,wl=null,meM=null,viewLayer=null;
+
+/* Carte (OpenStreetMap, gratuite) */
+const map=L.map('map',{zoomControl:false,maxZoom:19}).setView([46.6,2.4],6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+L.control.zoom({position:'topright'}).addTo(map);
+L.control.scale({imperial:false,position:'bottomleft'}).addTo(map);
+const line=L.polyline([],{color:'#0f7b6c',weight:6,opacity:.9}).addTo(map);
+const dots=L.layerGroup().addTo(map);
+map.on('dragstart',()=>setFollow(false));
+function setFollow(v){follow=v;$('#bFollow').classList.toggle('on',v)}
+$('#bFollow').onclick=()=>{setFollow(true);if(meM)map.setView(meM.getLatLng(),Math.max(map.getZoom(),17))};
+
+/* Utilitaires */
+const rad=d=>d*Math.PI/180;
+function hav(a,b){const R=6371008.8,dl=rad(b.lat-a.lat),dg=rad(b.lng-a.lng),
+ h=Math.sin(dl/2)**2+Math.cos(rad(a.lat))*Math.cos(rad(b.lat))*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+function dist(pts){let d=0;for(let i=1;i<pts.length;i++)d+=hav(pts[i-1],pts[i]);return d}
+const fmtD=m=>m<1000?Math.round(m)+' m':(m/1000).toFixed(2)+' km';
+const fmtT=s=>{s=Math.floor(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),r=s%60;
+ return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(r).padStart(2,'0')};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* Localisation en continu (point bleu) */
+function showMe(p){status('GPS OK · précision ±'+Math.round(p.coords.accuracy)+' m','ok');const ll=[p.coords.latitude,p.coords.longitude];
+ if(!meM)meM=L.marker(ll,{icon:L.divIcon({className:'',html:'<div class="me"></div>',iconSize:[18,18]}),interactive:false}).addTo(map);
+ else meM.setLatLng(ll);
+ if(follow&&!cur)map.setView(ll,Math.max(map.getZoom(),16))}
+const gerr=e=>({1:'Localisation refusée : autorise-la pour ce site (Chrome → cadenas → Autorisations).',2:'Position introuvable : active le GPS du téléphone.',3:'Délai dépassé : va à l’extérieur ou active la localisation précise.'}[e.code]||e.message);
+if(!window.isSecureContext)status('⚠ Ouvre l’appli via une adresse https:// (le GPS ne marche pas depuis un fichier local).','err');
+else if(!('geolocation' in navigator))status('Géolocalisation non disponible.','err');
+else navigator.geolocation.watchPosition(showMe,e=>status(gerr(e),'err'),{enableHighAccuracy:true,maximumAge:2000});
+
+/* UI */
+function ui(){
+ const pts=cur?cur.points:[];
+ $('#sPts').textContent=pts.length;
+ $('#sDist').textContent=fmtD(shown);
+ $('#sTime').textContent=cur?fmtT((Date.now()-cur.start)/1000):'0:00';
+ $('#rowIdle').hidden=!!cur;$('#rowRun').hidden=!cur;
+ $('#bUpd').hidden=S.mode!=='manual';$('#bUpd').disabled=pts.length<2;
+}
+function draw(){const pts=cur.points;line.setLatLngs(pts.map(p=>[p.lat,p.lng]));shown=dist(pts);ui()}
+
+/* Relevé d'un point */
+function addPt(p){
+  const pt={lat:p.coords.latitude,lng:p.coords.longitude,t:Date.now(),acc:Math.round(p.coords.accuracy||0),alt:p.coords.altitude};
+  cur.points.push(pt);
+  L.circleMarker([pt.lat,pt.lng],{radius:6,color:'#fff',weight:2,fillColor:'#e8a317',fillOpacity:1}).addTo(dots);
+  showMe(p);if(follow)map.panTo([pt.lat,pt.lng]);
+  if(S.mode==='auto')draw();else ui();
+}
+function sample(){
+ if(!cur)return;
+ navigator.geolocation.getCurrentPosition(addPt,e=>{
+  if(!cur)return;
+  navigator.geolocation.getCurrentPosition(addPt,e2=>toast(gerr(e2)),{enableHighAccuracy:false,timeout:15000,maximumAge:5000});
+ },{enableHighAccuracy:true,timeout:Math.max(10000,S.x*1000),maximumAge:0});
+}
+function status(m,c){const e=$('#status');e.textContent=m;e.className='status '+(c||'')}
+const toast=m=>status(m,'err');
+
+/* Démarrer / finir */
+async function start(){
+ if(!S.x){openSet();return}
+ clearView();line.setLatLngs([]);dots.clearLayers();shown=0;
+ cur={start:Date.now(),points:[]};
+ try{wl=await navigator.wakeLock.request('screen')}catch(e){}
+ sample();timer=setInterval(sample,S.x*1000);tick=setInterval(ui,1000);ui();
+}
+function finish(){
+ clearInterval(timer);clearInterval(tick);try{wl&&wl.release()}catch(e){}
+ if(cur.points.length>=2)draw();
+ const t=cur;cur=null;ui();
+ if(t.points.length<1)return;
+ const d=new Date(t.start),def='Trajet du '+d.toLocaleDateString('fr-FR')+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+ const name=prompt('Nom du trajet :',def);
+ if(name===null)return;
+ trips.unshift({id:t.start,name:name||def,start:t.start,end:Date.now(),interval:S.x,distance:dist(t.points),points:t.points});
+ save('trips',trips);
+ if(t.points.length>1)map.fitBounds(line.getBounds(),{padding:[40,160]});
+}
+$('#bNew').onclick=start;$('#bEnd').onclick=finish;
+$('#bUpd').onclick=()=>{if(cur&&cur.points.length>=2){draw();setFollow(follow)}};
+
+/* Paramètres */
+function openSet(){$('#iX').value=S.x||'';document.querySelectorAll('[name=mode]').forEach(r=>r.checked=r.value===S.mode);$('#shSet').classList.add('open')}
+$('#bSet').onclick=openSet;
+$('#bSave').onclick=()=>{const x=parseInt($('#iX').value,10);
+ if(!x||x<1){$('#iX').focus();alert('Indique un nombre de secondes (1 ou plus).');return}
+ S={x,mode:document.querySelector('[name=mode]:checked').value};save('settings',S);
+ $('#shSet').classList.remove('open');ui();
+ if(cur){clearInterval(timer);timer=setInterval(sample,S.x*1000)}};
+if(!S.x)openSet();
+
+/* Historique, export, import */
+function clearView(){if(viewLayer){map.removeLayer(viewLayer);viewLayer=null}}
+function renderList(){
+ const el=$('#list');
+ if(!trips.length){el.innerHTML='<div class="empty">Aucun trajet enregistré.<br>Termine un trajet ou importe un fichier.</div>';return}
+ el.innerHTML=trips.map((t,i)=>`<div class="trip"><h3>${esc(t.name)}</h3>
+ <p>${fmtD(t.distance)} · ${t.points.length} points · ${fmtT((t.end-t.start)/1000)} · 1 point / ${t.interval} s</p>
+ <div class="row"><button class="btn" data-a="v" data-i="${i}">Voir</button><button class="btn ghost" data-a="e" data-i="${i}">Exporter</button><button class="btn ghost" data-a="d" data-i="${i}">🗑️</button></div></div>`).join('');
+}
+$('#list').onclick=e=>{const b=e.target.closest('button');if(!b)return;const t=trips[b.dataset.i];
+ if(b.dataset.a==='v'){view(t)}
+ if(b.dataset.a==='e'){exportTrip(t)}
+ if(b.dataset.a==='d'&&confirm('Supprimer « '+t.name+' » ?')){trips.splice(b.dataset.i,1);save('trips',trips);renderList()}};
+function view(t){
+ if(cur)return alert('Termine d’abord le trajet en cours.');
+ clearView();line.setLatLngs([]);dots.clearLayers();
+ const ll=t.points.map(p=>[p.lat,p.lng]);
+ viewLayer=L.layerGroup([L.polyline(ll,{color:'#0f7b6c',weight:6}),
+  ...t.points.map(p=>L.circleMarker([p.lat,p.lng],{radius:4,color:'#fff',weight:1.5,fillColor:'#e8a317',fillOpacity:1})),
+  L.circleMarker(ll[0],{radius:9,color:'#fff',fillColor:'#2a9d3a',fillOpacity:1}).bindTooltip('Départ'),
+  L.circleMarker(ll[ll.length-1],{radius:9,color:'#fff',fillColor:'#c8372d',fillOpacity:1}).bindTooltip('Arrivée')]).addTo(map);
+ setFollow(false);shown=t.distance;$('#sDist').textContent=fmtD(t.distance);$('#sPts').textContent=t.points.length;$('#sTime').textContent=fmtT((t.end-t.start)/1000);
+ $('#shHist').classList.remove('open');
+ map.fitBounds(L.latLngBounds(ll),{padding:[40,180],maxZoom:18});
+}
+function exportTrip(t){
+ const gj={type:'FeatureCollection',properties:{app:'trajet-gps',name:t.name,start:t.start,end:t.end,interval:t.interval,distance:t.distance},
+  features:[{type:'Feature',properties:{kind:'trace'},geometry:{type:'LineString',coordinates:t.points.map(p=>[p.lng,p.lat])}},
+  ...t.points.map((p,i)=>({type:'Feature',properties:{kind:'point',n:i+1,t:p.t,acc:p.acc,alt:p.alt},geometry:{type:'Point',coordinates:[p.lng,p.lat]}}))]};
+ const blob=new Blob([JSON.stringify(gj)],{type:'application/geo+json'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+ a.download=t.name.replace(/[^\w\-]+/g,'_')+'.geojson';document.body.appendChild(a);a.click();a.remove();
+}
+$('#bImp').onclick=()=>$('#fileIn').click();
+$('#fileIn').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)return;
+ try{const g=JSON.parse(await f.text());
+  const pf=g.features.filter(x=>x.properties&&x.properties.kind==='point').sort((a,b)=>a.properties.n-b.properties.n);
+  let pts=pf.map(x=>({lat:x.geometry.coordinates[1],lng:x.geometry.coordinates[0],t:x.properties.t,acc:x.properties.acc,alt:x.properties.alt}));
+  if(!pts.length){const ls=g.features.find(x=>x.geometry.type==='LineString');
+   pts=ls.geometry.coordinates.map(c=>({lat:c[1],lng:c[0],t:null,acc:0,alt:null}))}
+  const m=g.properties||{},now=Date.now();
+  const t={id:now,name:m.name||f.name.replace(/\.\w+$/,''),start:m.start||now,end:m.end||now,interval:m.interval||'?',distance:dist(pts),points:pts};
+  trips.unshift(t);save('trips',trips);renderList();alert('Trajet importé : '+t.name);
+ }catch(err){alert('Fichier invalide. Utilise un .geojson exporté par cette appli.')}};
+$('#bHist').onclick=()=>{renderList();$('#shHist').classList.add('open')};
+$('#bClose').onclick=()=>$('#shHist').classList.remove('open');
+ui();
+</script>
+</body>
+</html>
